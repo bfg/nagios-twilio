@@ -1,0 +1,294 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+
+use JSON;
+use HTTP::Request;
+use LWP::UserAgent;
+use File::Basename;
+use Getopt::Long;
+
+use URI::Escape qw(uri_escape_utf8);
+use MIME::Base64 qw(encode_base64);
+
+#####################################################
+
+my $cfg = {
+  from          => undef,
+  user_id       => undef,
+  auth_token    => undef,
+  timeout       => 5,
+  verbose       => 0,
+  deferred_dir  => "/tmp",
+  max_tries     => 3,
+};
+
+#####################################################
+
+my $MYNAME = basename($0);
+my $VERSION = '0.20';
+my $HOME = ((getpwuid($>))[7]);
+
+my $ua = undef;
+my $jp = JSON->new->utf8(1);
+my @cfg_files = (
+  "/etc/${MYNAME}.conf",
+  "/usr/local/etc/${MYNAME}.conf",
+  "/etc/icinga/${MYNAME}.conf",
+  "/etc/nagios/${MYNAME}.conf",
+  "/etc/nagios3/${MYNAME}.conf",
+  "/usr/local/etc/icinga/${MYNAME}.conf",
+  "/usr/local/etc/nagios/${MYNAME}.conf",
+  "/usr/local/etc/nagios3/${MYNAME}.conf",
+  "$HOME/config/${MYNAME}/${MYNAME}.conf",
+  "$HOME/config/${MYNAME}.conf",
+  "$HOME/.config/${MYNAME}/${MYNAME}.conf",
+  "$HOME/.config/${MYNAME}.conf",
+  "$HOME/.${MYNAME}.conf",
+);
+
+sub file_write {
+  my ($file, $buf) = @_;
+  my $fh = undef;
+  open($fh, '>', $file) || return undef;
+  print $fh $buf;
+  close($fh);
+}
+
+sub file_read {
+  my ($file) = @_;
+  my $buf = undef;
+  my $fh = undef;
+  open($fh, '<', $file) || return undef;
+  read($fh, $buf, 1024 * 1024);
+  close($fh);
+  $buf;
+}
+
+sub save_deferred {
+  my ($msg) = @_;
+  $msg->{tries}++;
+  my $f = $cfg->{deferred_dir} . '/.' . $> . '.' . $msg->{time} . '.deferred';
+  file_write($f, $jp->encode($msg));
+}
+
+
+sub process_deffered {
+  my $dh = undef;
+  opendir($dh, $cfg->{deferred_dir}) || die "Unable to open directory $cfg->{deferred_dir}: $!\n";
+  while (defined (my $e = readdir($dh))) {
+    next if ($e eq '.' || $e eq '..');
+    next unless ($e =~ m/^\.$>\.\d+\.deferred$/);
+    my $f = $cfg->{deferred_dir} . '/' . $e;
+    next unless (-f $f && -r $f);
+    my $msg = eval { $jp->decode(file_read($f)) };
+    unless (defined $msg) {
+      unlink($f);
+      next;
+    }
+
+    # too many sending attempts?
+    if ($cfg->{max_tries} && $msg->{tries} > $cfg->{max_tries}) {
+      unlink($f);
+      next;
+    }
+
+    # try to-resend
+    eval { msg_send_real($msg); unlink($f) };
+
+    # resend failed?! defer it again!
+    save_deferred($msg) if ($@);
+  }
+  closedir($dh);
+}
+
+sub config_read_all {
+  map { eval { config_read($_) } } @cfg_files;
+}
+
+sub config_read {
+  my ($file) = @_;
+  my $buf = file_read($file);
+  die "Unable to open file $file: $!\n" unless (defined $buf);
+  foreach my $l (split(/[\r\n]+/, $buf)) {
+    $l =~ s/^\s*//g;
+    $l =~ s/\s*$//g;
+    $l =~ s/^(.+)#.*/$1/g;
+    next unless (length $l);
+    my ($k, $v) = split(/\s*[=:]+\s*/, $l, 2);
+    next unless (defined $k && length $k && defined $v);
+    $v =~ s/^["']+//g;
+    $v =~ s/["']+$//g;
+    next unless (length $v);
+    $cfg->{$k} = $v if (exists($cfg->{$k}));
+  }
+  return 1;
+}
+
+sub config_default {
+  my $buf = dmp($cfg);
+  $buf =~ s/[{}'",]+//gm;
+  $buf =~ s/=>/=/gm;
+  $buf =~ s/  //gm;
+  return "#\n# $MYNAME configuration\n#\n" .$buf . "# EOF\n";
+}
+
+sub ua_get {
+  unless (defined $ua) {
+    $ua = LWP::UserAgent->new();
+    $ua->env_proxy();
+    $ua->timeout(10);
+  }
+  $ua;
+}
+
+sub msg_send_real {
+  my ($msg) = @_;
+
+  my $url = 'https://api.twilio.com/2010-04-01/Accounts/' .
+    uri_escape_utf8($msg->{user_id}) .
+    '/SMS/Messages.json';
+  my $req = HTTP::Request->new(POST => $url);
+  $req->header(
+    'Authorization',
+    'Basic ' . encode_base64($msg->{user_id} . ':' . $msg->{auth_token}, '')
+  );
+  $req->header('Content-Type', 'application/x-www-form-urlencoded');
+
+  my $body = 'From=' . uri_escape_utf8($msg->{from}) . "&";
+  $body .= 'To=' . uri_escape_utf8($msg->{recipient}) . "&";
+  $body .= 'Body=' . uri_escape_utf8($msg->{msg});
+
+  use bytes;
+  $req->header('Content-Length', length($body));
+  $req->add_content($body);
+
+  # fire the goddamn request!
+  my $ua = ua_get();
+  msg_verbose("Sending request: " . $req->as_string) if ($cfg->{verbose});
+  my $r = $ua->request($req);
+  die "Request failed: " . $r->status_line . "\n" unless ($r->is_success);
+
+  my $j = eval { JSON->new->utf8(1)->decode($r->decoded_content) };
+  die "Error decoding JSON response: $@\n" if ($@);
+
+  msg_verbose("Returned JSON: " . dmp($j)) if ($cfg->{verbose});
+  die "API response: Message wasn't queued: $j->{status}\n" unless ($j->{status} eq 'queued');
+
+  return 1;
+}
+
+sub msg_prepare {
+  my $msg = shift;
+  map {
+    return {
+      msg       => $msg,
+      recipient => $_,
+      time      => time(),
+      from      => $cfg->{from},
+      user_id   => $cfg->{user_id},
+      auth_token => $cfg->{auth_token},
+      tries     => 0,
+    }
+  } @_;
+}
+
+sub msg_send {
+  my ($m, $recip) = @_;
+  $recip = '+' . $recip unless ($recip =~ m/^\+/);
+  my $msg = msg_prepare($m, $recip);
+
+  # try to send
+  save_deferred($msg);
+  return 1 if (msg_send_real($msg));
+
+  # saved failed message to deffered
+  save_deferred($msg);
+  return 1;
+}
+
+sub msg_verbose {
+  return unless $cfg->{verbose};
+  print STDERR join('', @_), "\n";
+}
+
+sub dmp {
+  require Data::Dumper;
+  my $d = Data::Dumper->new([ @_ ]);
+  $d->Terse(1);
+  $d->Indent(1);
+  $d->Sortkeys(1);
+  return $d->Dump();
+}
+
+sub printhelp {
+  no warnings;
+  print <<EOF;
+Usage: $MYNAME [OPTIONS] <recipient> <recipient> ...
+
+This script is simple command line interface to
+Twilio (http://www.twilio.com/) SMS service.
+
+OPTIONS:
+      --default-config     Prints out default configuration file
+  -c  --config=FILE        Read configuration from specified
+                           file. NOTE Script tries to read
+                           the following files on startup:
+
+EOF
+  map { print "                           $_\n"; } @cfg_files;
+print <<EOF;
+
+  -m  --msg=MSG            Message text; message is read from
+                           stdin if omitted.
+
+  -f  --from=NUM           Sender number
+  -P  --process            Process deferred messages
+
+  -t  --timeout=SECS       HTTP request timeout in seconds
+  -q  --quiet              Quiet execution
+  -v  --verbose            Verbose execution
+  -V  --version            Prints script version
+  -h  --help               This help message
+EOF
+}
+
+#####################################################
+
+my $msg = undef;
+
+config_read_all();
+
+Getopt::Long::Configure('bundling', 'gnu_compat');
+my $g = GetOptions(
+  'c|config=s'          => sub { config_read($_[1]) },
+  'default-config'      => sub { print config_default(); exit 0 },
+  'P|process'           => sub { process_deffered(); exit 0 },
+  'f|from=s'            => \$cfg->{from},
+  'm|msg=s'             => \$msg,
+  't|timeout=i'         => \$cfg->{timeout},
+  'q|quiet!'            => sub { $cfg->{verbose} = ! $_[1] },
+  'v|verbose!'          => \$cfg->{verbose},
+  'V|version'           => sub { print "$MYNAME $VERSION\n"; exit 0 },
+  'h|help'              => sub { printhelp(), exit 0 },
+);
+
+unless ($g) {
+  die "Invalid command line options, run $MYNAME --help for instructions.\n";
+}
+
+# no recipients?
+die "No recipients specified! Run $MYNAME --help for instructions.\n" unless (@ARGV);
+
+# no message? read it from stdin.
+unless (defined $msg) {
+  msg_verbose("No message specified from command line, reading stdin.");
+  $msg = '';
+  while (<STDIN>) { $msg .= $_ }
+}
+
+map { msg_send($msg, $_) } @ARGV;
+
+# vim:shiftwidth=2 softtabstop=2 expandtab
+# EOF
