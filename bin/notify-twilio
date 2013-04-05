@@ -28,11 +28,13 @@
 use strict;
 use warnings;
 
+use bytes;
 use JSON;
 use HTTP::Request;
 use LWP::UserAgent;
 use File::Basename;
 use Getopt::Long;
+use POSIX qw(ceil);
 
 use URI::Escape qw(uri_escape_utf8);
 use MIME::Base64 qw(encode_base64);
@@ -44,19 +46,27 @@ my $cfg = {
   user_id       => undef,
   auth_token    => undef,
   timeout       => 5,
-  verbose       => 0,
+  split_big_msg => 0,
   deferred_dir  => "/tmp",
+  defer_enabled => 1,
   max_tries     => 3,
 };
 
 #####################################################
 
+use constant MSG_LEN_LIMIT => 160;
+use constant TWILIO_URL    => 'https://api.twilio.com/2010-04-01/Accounts/%s/SMS/Messages.json';
+
 my $MYNAME = basename($0);
 my $VERSION = '0.20';
 my $HOME = ((getpwuid($>))[7]);
+my $verbose = 0;
+my $debug = 0;
+my $report = 0;
+my $_rep = [];
 
 my $ua = undef;
-my $jp = JSON->new->utf8(1);
+my $jp = JSON->new->utf8(1)->pretty(1);
 my @cfg_files = (
   "/etc/${MYNAME}.conf",
   "/usr/local/etc/${MYNAME}.conf",
@@ -72,6 +82,43 @@ my @cfg_files = (
   "$HOME/.config/${MYNAME}.conf",
   "$HOME/.${MYNAME}.conf",
 );
+
+sub ntfy_verbose {
+  return unless $verbose;
+  print STDERR "VERBOSE: ", join('', @_), "\n";
+}
+
+sub ntfy_debug {
+  return unless $debug;
+  print STDERR "DEBUG:   ", join('', @_), "\n";
+}
+
+sub ntfy_fatal {
+  my $msg = join('', @_);
+  $msg =~ s/\s+$//g;
+  print STDERR $msg, "\n";
+  my_exit(1);
+}
+
+sub my_exit {
+  my $c = shift;
+  report_status();
+  exit $c;
+}
+
+sub report_status {
+  return unless $report;
+  print $jp->encode($_rep);
+}
+
+sub dmp {
+  require Data::Dumper;
+  my $d = Data::Dumper->new([ @_ ]);
+  $d->Terse(1);
+  $d->Indent(1);
+  $d->Sortkeys(1);
+  return $d->Dump();
+}
 
 sub file_write {
   my ($file, $buf) = @_;
@@ -92,9 +139,18 @@ sub file_read {
 }
 
 sub save_deferred {
-  my ($msg) = @_;
+  my ($msg, $err) = @_;
+  return 1 unless ($cfg->{defer_enabled});
   $msg->{tries}++;
-  my $f = $cfg->{deferred_dir} . '/.' . $> . '.' . $msg->{time} . '.deferred';
+  $msg->{err} = $err if (defined $err);
+  my $f =
+    $cfg->{deferred_dir} .
+    '/.' .
+    $> .
+    '.' .
+    $msg->{time} .
+    '.' . $msg->{id} .
+    '.deferred';
   file_write($f, $jp->encode($msg));
 }
 
@@ -104,7 +160,7 @@ sub process_deffered {
   opendir($dh, $cfg->{deferred_dir}) || die "Unable to open directory $cfg->{deferred_dir}: $!\n";
   while (defined (my $e = readdir($dh))) {
     next if ($e eq '.' || $e eq '..');
-    next unless ($e =~ m/^\.$>\.\d+\.deferred$/);
+    next unless ($e =~ m/^\.$>\..+\.deferred$/);
     my $f = $cfg->{deferred_dir} . '/' . $e;
     next unless (-f $f && -r $f);
     my $msg = eval { $jp->decode(file_read($f)) };
@@ -123,7 +179,7 @@ sub process_deffered {
     eval { msg_send_real($msg); unlink($f) };
 
     # resend failed?! defer it again!
-    save_deferred($msg) if ($@);
+    save_deferred($msg, $@) if ($@);
   }
   closedir($dh);
 }
@@ -163,17 +219,25 @@ sub ua_get {
   unless (defined $ua) {
     $ua = LWP::UserAgent->new();
     $ua->env_proxy();
-    $ua->timeout(10);
+    $ua->timeout($cfg->{timeout});
+    my $cc = eval {
+      require LWP::ConnCache;
+      LWP::ConnCache->new(total_capacity => 100);
+    };
+    $ua->conn_cache($cc) if (defined $cc);
   }
   $ua;
 }
 
+sub msg_id {
+  return uc(sprintf("%x", rand(2 ** 32)));
+}
+
 sub msg_send_real {
   my ($msg) = @_;
+  local $@;
 
-  my $url = 'https://api.twilio.com/2010-04-01/Accounts/' .
-    uri_escape_utf8($msg->{user_id}) .
-    '/SMS/Messages.json';
+  my $url = sprintf(TWILIO_URL, uri_escape_utf8($msg->{user_id}));
   my $req = HTTP::Request->new(POST => $url);
   $req->header(
     'Authorization',
@@ -185,72 +249,104 @@ sub msg_send_real {
   $body .= 'To=' . uri_escape_utf8($msg->{recipient}) . "&";
   $body .= 'Body=' . uri_escape_utf8($msg->{msg});
 
-  use bytes;
   $req->header('Content-Length', length($body));
   $req->add_content($body);
 
   # fire the goddamn request!
   my $ua = ua_get();
-  msg_verbose("Sending request: " . $req->as_string) if ($cfg->{verbose});
+  ntfy_debug("Sending request: " . $req->as_string);
   my $r = $ua->request($req);
-  die "Request failed: " . $r->status_line . "\n" unless ($r->is_success);
+  ntfy_verbose("HTTP status: " . $r->status_line);
+  ntfy_debug("Returned response: " . $r->as_string) if ($debug);
+  unless ($r->is_success) {
+    my $j = eval { $jp->decode($r->decoded_content) };
+    my $reason = (defined $j) ? $j->{message} : undef;
+    push(@{$_rep}, $j) if (defined $j);
+    my $e = "HTTP request failed: " . $r->status_line;
+    $e .= "; reason: $reason" if (defined $reason);
+    die "$e\n";
+  }
 
-  my $j = eval { JSON->new->utf8(1)->decode($r->decoded_content) };
+  my $j = eval { $jp->decode($r->decoded_content) };
   die "Error decoding JSON response: $@\n" if ($@);
+  push(@{$_rep}, $j);
 
-  msg_verbose("Returned JSON: " . dmp($j)) if ($cfg->{verbose});
+  ntfy_debug("Returned JSON: " . dmp($j)) if ($debug);
   die "API response: Message wasn't queued: $j->{status}\n" unless ($j->{status} eq 'queued');
 
   return 1;
 }
 
+sub msg_split {
+  my ($str) = @_;
+  my @r = ();
+  my $l = length($str);
+  if ($l > MSG_LEN_LIMIT) {
+    if ($cfg->{split_big_msg}) {
+      my $len = MSG_LEN_LIMIT - 5;
+      my $max = ceil($l / $len);
+      die "Message too long: $l bytes.\n" if ($max > 9);
+      for (my $i = 1; $i <= $max; $i++) {
+        push(@r, "$i/$max: " . substr($str, ($i - 1) * $len, $len));
+      }
+    } else {
+      push(@r, substr($str, 0, MSG_LEN_LIMIT));
+    }
+  } else {
+    @r = ($str);
+  }
+
+  return @r;
+}
+
 sub msg_prepare {
   my $msg = shift;
-  map {
-    return {
-      msg       => $msg,
-      recipient => $_,
-      time      => time(),
-      from      => $cfg->{from},
-      user_id   => $cfg->{user_id},
-      auth_token => $cfg->{auth_token},
-      tries     => 0,
-    }
-  } @_;
+  my @res = ();
+  foreach my $recip (@_) {
+    map {
+      push(@res, {
+        id        => msg_id(),
+        msg       => $_,
+        recipient => $recip,
+        time      => time(),
+        from      => $cfg->{from},
+        user_id   => $cfg->{user_id},
+        auth_token=> $cfg->{auth_token},
+        tries     => 0,
+      });
+    } msg_split($msg);
+  }
+
+  return @res;
 }
 
 sub msg_send {
   my ($m, $recip) = @_;
   $recip = '+' . $recip unless ($recip =~ m/^\+/);
-  my $msg = msg_prepare($m, $recip);
 
-  # try to send
-  save_deferred($msg);
-  return 1 if (msg_send_real($msg));
+  my $i = 0;
+  my $ok = 1;
+  my $err = '';
+  foreach my $msg (msg_prepare($m, $recip)) {
+    $i++;
+    # try to send
+    eval { msg_send_real($msg) };
 
-  # saved failed message to deffered
-  save_deferred($msg);
-  return 1;
-}
+    # defer if failed
+    if ($@) {
+      save_deferred($msg, $@);
+      $ok = 0;
+      $err .= "MSG $i: " . $@;
+    }
+  }
 
-sub msg_verbose {
-  return unless $cfg->{verbose};
-  print STDERR join('', @_), "\n";
-}
-
-sub dmp {
-  require Data::Dumper;
-  my $d = Data::Dumper->new([ @_ ]);
-  $d->Terse(1);
-  $d->Indent(1);
-  $d->Sortkeys(1);
-  return $d->Dump();
+  ntfy_fatal($err) unless ($ok);
 }
 
 sub printhelp {
   no warnings;
   print <<EOF;
-Usage: $MYNAME [OPTIONS] <recipient> <recipient> ...
+Usage: $MYNAME [OPTIONS] -- <recipient> <recipient> ...
 
 This script is simple command line interface to
 Twilio (http://www.twilio.com/) SMS service.
@@ -268,14 +364,20 @@ print <<EOF;
   -m  --msg=MSG            Message text; message is read from
                            stdin if omitted.
 
-  -f  --from=NUM           Sender number
-  -P  --process            Process deferred messages
+  -f  --from=NUM           Sender number (Default: $cfg->{from})
 
-  -t  --timeout=SECS       HTTP request timeout in seconds
-  -q  --quiet              Quiet execution
+  -P  --process            Process deferred messages
+  -t  --timeout=SECS       HTTP request timeout in seconds (Default: $cfg->{timeout})
+
+  -r  --report             Report response statuses
   -v  --verbose            Verbose execution
+  -D  --debug              Enable script debugging.
   -V  --version            Prints script version
   -h  --help               This help message
+
+EXAMPLE:
+
+  cat file | $MYNAME -f "+1234567890" -- +1987654321 +145678923
 EOF
 }
 
@@ -293,8 +395,9 @@ my $g = GetOptions(
   'f|from=s'            => \$cfg->{from},
   'm|msg=s'             => \$msg,
   't|timeout=i'         => \$cfg->{timeout},
-  'q|quiet!'            => sub { $cfg->{verbose} = ! $_[1] },
-  'v|verbose!'          => \$cfg->{verbose},
+  'r|report'            => \$report,
+  'v|verbose!'          => \$verbose,
+  'D|debug'             => \$debug,
   'V|version'           => sub { print "$MYNAME $VERSION\n"; exit 0 },
   'h|help'              => sub { printhelp(), exit 0 },
 );
@@ -308,12 +411,13 @@ die "No recipients specified! Run $MYNAME --help for instructions.\n" unless (@A
 
 # no message? read it from stdin.
 unless (defined $msg) {
-  msg_verbose("No message specified from command line, reading stdin.");
+  ntfy_verbose("No message specified from command line, reading stdin.");
   $msg = '';
   while (<STDIN>) { $msg .= $_ }
 }
 
 map { msg_send($msg, $_) } @ARGV;
+my_exit(0);
 
 # vim:shiftwidth=2 softtabstop=2 expandtab
 # EOF
