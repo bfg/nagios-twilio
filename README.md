@@ -24,7 +24,9 @@ Setup
   * install this package and put the script in $PATH
   * Create default configuration file
 
+```
 twilio-sms --default-config > ~/.twilio-sms.conf
+```
 
   * Edit configuration file to suit your twilio account settings
 
