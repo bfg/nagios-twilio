@@ -38,6 +38,28 @@ split_big_msg = 1   # you probably want to send sms messages larger than 160 cha
 rewrite       = 0
 ```
 
+Scripts searches for configuration files in the following filesystem locations:
+
+```
+/etc/twilio-sms.conf
+/usr/local/etc/twilio-sms.conf
+/etc/icinga/twilio-sms.conf
+/etc/nagios/twilio-sms.conf
+/etc/nagios3/twilio-sms.conf
+/usr/local/etc/icinga/twilio-sms.conf
+/usr/local/etc/nagios/twilio-sms.conf
+/usr/local/etc/nagios3/twilio-sms.conf
+$HOME/config/twilio-sms/twilio-sms.conf
+$HOME/config/twilio-sms.conf
+$HOME/.config/twilio-sms/twilio-sms.conf
+$HOME/.config/twilio-sms.conf
+$HOME/.twilio-sms.conf
+```
+
+Script allways tries to read all configuration files listed above, variable values
+are inherited from previously loaded configuration files if they are omitted from
+configuration file currently being loaded.
+
   * Try to send a message :)
 
 ```
