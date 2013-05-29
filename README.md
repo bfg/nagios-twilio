@@ -1,4 +1,4 @@
-twilio-sms
+notify-twilio
 ===
 
 **twilio-sms** is [Perl](http://www.perl.org) command line script which is able to send SMS messages
@@ -41,10 +41,65 @@ Setup
 
 Nagios/Icinga setup
 ===
+  * add the following new commands to your Nagios/Icinga configuration:
 
-TODO
+```
+    define command {
+        command_name    notify-service-by-twilio
+        command_line    /usr/bin/printf "%b" "Service: $SERVICEDESC$\nHost: $HOSTALIAS$\nState: $SERVICESTATE$\n\n$SERVICEOUTPUT$" | /etc/icinga/plugins/twilio-sms -- $CONTACTPAGER$
+    }
+    
+    define command {
+        command_name    notify-host-by-twilio
+        command_line    /usr/bin/printf "%b" "Host: $HOSTNAME$\nState: $HOSTSTATE$\n\n$HOSTOUTPUT$" | /etc/icinga/plugins/twilio-sms -- $CONTACTPAGER$
+    }
+```
+
+  * define new template and update contacts
+
+```
+    # contact template
+    define contact {
+        contact_name                    twilio-template
+        name                            twilio-template
+        alias                           Twilio contact template
+        
+        service_notification_period     24x7
+        host_notification_period        24x7
+        service_notification_options    w,u,c,r
+        host_notification_options       d,r
+        service_notification_commands   notify-service-by-twilio
+        host_notification_commands      notify-host-by-twilio
+        
+        register                        0
+    }
+    
+    ##
+    ## REAL contacts, based on twilio-template
+    ##
+    
+    define contact {
+        use                             twilio-template
+        contact_name                    joe_average
+        pager                           +1234567890
+    }
+    
+    define contactgroup {
+        contactgroup_name       poor_bastards_on_call
+        members                 joe_average
+    }
+```
+
+  * update service definitions to use new contactgroups
+
+```
+define service {
+        name                            some_service
+        # other boring stuff
+        contact_groups                  poor_bastards_on_call
+}
+```
 
 License
 ===
 [The BSD 3-Clause License](http://opensource.org/licenses/BSD-3-Clause)
-
