@@ -50,6 +50,7 @@ my $cfg = {
   deferred_dir  => "/tmp",
   defer_enabled => 1,
   max_tries     => 3,
+  msg_rewrite   => 0,
 };
 
 #####################################################
@@ -375,7 +376,11 @@ sub recipients_read {
 
 sub msg_rewrite {
   my ($s) = @_;
-
+  return $s unless ($cfg->{msg_rewrite});
+  no warnings;
+  $s =~ s/(?<!\\)\$\{?([\w]+)\}?/$ENV{$1}/gm;
+  $s =~ s/\\\$/\$/gm;
+  $s;
 }
 
 sub printhelp {
@@ -400,6 +405,9 @@ print <<EOF;
   -M  --msg-file=FILE      Read message text from specified file
                            NOTE: message is read from stdin if -m/-M
                            parameters are omitted.
+
+      --rewrite            Rewrite variables in message with environmental
+                           variable values (shell style)
 
   -R  --recipients=FILE    Read specified file containing recipient numbers
                            (one phone number per line, # comments supported)
@@ -440,6 +448,7 @@ my $g = GetOptions(
     $msg = file_read($_[1]);
     die "Error reading message file $_[1]: $!\n" unless (defined $msg && length($msg));
   },
+  'rewrite!'            => \$cfg->{msg_rewrite},
   'R|recipients=s'      => sub { recipients_read($_[1], \@recipients) },
   't|timeout=i'         => \$cfg->{timeout},
   'r|report'            => \$report,
@@ -465,6 +474,8 @@ unless (defined $msg) {
   $msg = '';
   while (<STDIN>) { $msg .= $_ }
 }
+
+$msg = msg_rewrite($msg);
 
 map { msg_send($msg, $_) } @recipients;
 my_exit(0);
