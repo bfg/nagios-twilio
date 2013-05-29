@@ -38,7 +38,7 @@ split_big_msg = 1   # you probably want to send sms messages larger than 160 cha
 rewrite       = 0
 ```
 
-Scripts searches for configuration files in the following filesystem locations:
+**twilio-sms** searches for configuration files in the following filesystem locations:
 
 ```
 /etc/twilio-sms.conf
@@ -63,7 +63,7 @@ configuration file currently being loaded.
   * Try to send a message :)
 
 ```
-echo "Hello World" | twillio-sms -- +1987654321 +1987654322
+echo "Hello World" | twilio-sms -- +1987654321 +1987654322
 ```
 
 Nagios/Icinga setup
@@ -124,6 +124,63 @@ define service {
   # other boring stuff
   contact_groups                  poor_bastards_on_call
 }
+```
+
+Usage
+==
+
+```
+$ twilio-sms --help
+Usage: twilio-sms [OPTIONS] -- <recipient> <recipient> ...
+
+This script is simple command line interface to
+Twilio (http://www.twilio.com/) SMS service.
+
+OPTIONS:
+      --default-config     Prints out default configuration file
+  -c  --config=FILE        Read configuration from specified
+                           file. NOTE Script tries to read
+                           the following files on startup:
+
+                           /etc/twilio-sms.conf
+                           /usr/local/etc/twilio-sms.conf
+                           /etc/icinga/twilio-sms.conf
+                           /etc/nagios/twilio-sms.conf
+                           /etc/nagios3/twilio-sms.conf
+                           /usr/local/etc/icinga/twilio-sms.conf
+                           /usr/local/etc/nagios/twilio-sms.conf
+                           /usr/local/etc/nagios3/twilio-sms.conf
+                           /home/bfg/config/twilio-sms/twilio-sms.conf
+                           /home/bfg/config/twilio-sms.conf
+                           /home/bfg/.config/twilio-sms/twilio-sms.conf
+                           /home/bfg/.config/twilio-sms.conf
+                           /home/bfg/.twilio-sms.conf
+
+  -m  --msg=MSG            Message text
+  -M  --msg-file=FILE      Read message text from specified file
+                           NOTE: message is read from stdin if -m/-M
+                           parameters are omitted.
+
+      --rewrite            Rewrite variables in message with environmental
+                           variable values (shell style)
+
+  -R  --recipients=FILE    Read specified file containing recipient numbers
+                           (one phone number per line, # comments supported)
+
+  -f  --from=NUM           Sender number (Default: +19493834522)
+
+  -P  --process            Process deferred messages
+  -t  --timeout=SECS       HTTP request timeout in seconds (Default: 10)
+
+  -r  --report             Report response statuses
+  -v  --verbose            Verbose execution
+  -D  --debug              Enable script debugging.
+  -V  --version            Prints script version
+  -h  --help               This help message
+
+EXAMPLE:
+
+  cat file | twilio-sms -f "+1234567890" -- +1987654321 +145678923
 ```
 
 License
