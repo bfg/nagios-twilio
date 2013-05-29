@@ -64,6 +64,7 @@ my $verbose = 0;
 my $debug = 0;
 my $report = 0;
 my $_rep = [];
+my @recipients = ();
 
 my $ua = undef;
 my $jp = JSON->new->utf8(1)->pretty(1);
@@ -215,6 +216,19 @@ sub config_default {
   return "#\n# $MYNAME configuration\n#\n" .$buf . "# EOF\n";
 }
 
+sub config_validate {
+  my $msg = undef;
+
+  for (qw(from user_id auth_token)) {
+    unless (defined $cfg->{$_} && length($cfg->{$_})) {
+      $msg = "Key $_ is not defined.";
+      last;
+    }
+  }
+
+  die "BAD CONFIGURATION: $msg\n" if ($msg);
+}
+
 sub ua_get {
   unless (defined $ua) {
     $ua = LWP::UserAgent->new();
@@ -343,6 +357,27 @@ sub msg_send {
   ntfy_fatal($err) unless ($ok);
 }
 
+sub recipients_read {
+  my ($file, $ref) = @_;
+  my $buf = file_read($file);
+  unless (defined $buf && length($buf))  {
+    die "No recipients can't be read from recipients file $file: $!\n"
+  }
+
+  foreach my $l (split(/[\r\n]+/, $buf)) {
+    $l =~ s/^\s+//g;
+    ($l, undef) = split(/\s*#\s*/, $l);
+    $l =~ s/\s+$//g;
+    next unless (length($l));
+    push(@{$ref}, $l);
+  }
+}
+
+sub msg_rewrite {
+  my ($s) = @_;
+
+}
+
 sub printhelp {
   no warnings;
   print <<EOF;
@@ -361,8 +396,13 @@ EOF
   map { print "                           $_\n"; } @cfg_files;
 print <<EOF;
 
-  -m  --msg=MSG            Message text; message is read from
-                           stdin if omitted.
+  -m  --msg=MSG            Message text
+  -M  --msg-file=FILE      Read message text from specified file
+                           NOTE: message is read from stdin if -m/-M
+                           parameters are omitted.
+
+  -R  --recipients=FILE    Read specified file containing recipient numbers
+                           (one phone number per line, # comments supported)
 
   -f  --from=NUM           Sender number (Default: $cfg->{from})
 
@@ -394,6 +434,13 @@ my $g = GetOptions(
   'P|process'           => sub { process_deffered(); exit 0 },
   'f|from=s'            => \$cfg->{from},
   'm|msg=s'             => \$msg,
+  'M|msg-file=s'        => sub {
+    no warnings;
+    die "Bad message file '$_[1]'\n" unless (defined $_[1] && length($_[1]) && -f $_[1]);
+    $msg = file_read($_[1]);
+    die "Error reading message file $_[1]: $!\n" unless (defined $msg && length($msg));
+  },
+  'R|recipients=s'      => sub { recipients_read($_[1], \@recipients) },
   't|timeout=i'         => \$cfg->{timeout},
   'r|report'            => \$report,
   'v|verbose!'          => \$verbose,
@@ -406,8 +453,11 @@ unless ($g) {
   die "Invalid command line options, run $MYNAME --help for instructions.\n";
 }
 
+config_validate();
+
 # no recipients?
-die "No recipients specified! Run $MYNAME --help for instructions.\n" unless (@ARGV);
+push(@recipients, @ARGV);
+die "No recipients specified! Run $MYNAME --help for instructions.\n" unless (@recipients);
 
 # no message? read it from stdin.
 unless (defined $msg) {
@@ -416,7 +466,7 @@ unless (defined $msg) {
   while (<STDIN>) { $msg .= $_ }
 }
 
-map { msg_send($msg, $_) } @ARGV;
+map { msg_send($msg, $_) } @recipients;
 my_exit(0);
 
 # vim:shiftwidth=2 softtabstop=2 expandtab
