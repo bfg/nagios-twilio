@@ -129,8 +129,8 @@ define service {
 ```
 
   * set up cron job for deferred message processing
-```
 
+```
 # Try to re-send messages using Twilio that were not sent
 # at the time of script invocation.
 #
