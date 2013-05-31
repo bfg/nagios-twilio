@@ -4,7 +4,7 @@ notify-twilio
 **twilio-sms** is [Perl](http://www.perl.org) command line script which is able to send SMS messages
 using [Twilio](http://www.twilio.com) SMS service.
 
-Even though this script can be used for any kind of sms messaging need, it's
+Even though this script can be used for any kind of SMS messaging needs, it's
 primary use is [Nagios](http://www.nagios.org)/[Icinga](http://www.icinga.org)
 alerting.
 
@@ -128,12 +128,24 @@ define service {
 }
 ```
 
+  * set up cron job for deferred message processing
+```
+
+# Try to re-send messages using Twilio that were not sent
+# at the time of script invocation.
+#
+# There are many reasons for messages not being delivered
+# on first attempt: internet connection unavailable, twilio
+# api outage, etc...
+
+*/15 * * * *	nagios /path/to/twilio-sms -P >/dev/null 2>&1
+```
+
 Usage
 ==
 
 ```
-$ twilio-sms --help
-Usage: twilio-sms [OPTIONS] -- <recipient> <recipient> ...
+Usage: twilio-sms [OPTIONS] [-- <recipient> [<recipient> ...]]
 
 This script is simple command line interface to
 Twilio (http://www.twilio.com/) SMS service.
@@ -180,9 +192,23 @@ OPTIONS:
   -V  --version            Prints script version
   -h  --help               This help message
 
-EXAMPLE:
+EXAMPLES:
 
-  cat file | twilio-sms -f "+1234567890" -- +1987654321 +145678923
+  # send file contents over SMS
+  cat /path/to/file | twilio-sms -- +1987654321 +145678923
+  twilio-sms -M /path/to/file -- +1987654321 +145678923
+
+  # send simple string
+  twilio-sms -m 'Hello world from $USER'  -- +1987654321
+  twilio-sms -m 'Hello world from $USER' --rewrite  -- +1987654321
+  twilio-sms -m 'Hello world from \$USER' --rewrite  -- +1987654321
+
+  echo 'Hello world from $USER' | twilio-sms  -- +1987654321
+  echo 'Hello world from $USER' | twilio-sms --rewrite  -- +1987654321
+  echo 'Hello world from \$USER' | twilio-sms --rewrite  -- +1987654321
+
+  # process deferred messages (usually from cron)
+  twilio-sms -P
 ```
 
 License
