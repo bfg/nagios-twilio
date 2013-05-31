@@ -59,7 +59,7 @@ use constant MSG_LEN_LIMIT => 160;
 use constant TWILIO_URL    => 'https://api.twilio.com/2010-04-01/Accounts/%s/SMS/Messages.json';
 
 my $MYNAME = basename($0);
-my $VERSION = '0.20';
+my $VERSION = '0.21';
 my $HOME = ((getpwuid($>))[7]);
 my $verbose = 0;
 my $debug = 0;
@@ -375,18 +375,22 @@ sub recipients_read {
 }
 
 sub msg_rewrite {
-  my ($s) = @_;
-  return $s unless ($cfg->{msg_rewrite});
+  return $_[0] unless ($cfg->{msg_rewrite});
   no warnings;
+  my $s = $_[0];
   $s =~ s/(?<!\\)\$\{?([\w]+)\}?/$ENV{$1}/gm;
   $s =~ s/\\\$/\$/gm;
+  if ($debug && $s ne $_[0]) {
+    ntfy_debug("Original message:  $_[0]");
+    ntfy_debug("Rewritten message: $s");
+  }
   $s;
 }
 
 sub printhelp {
   no warnings;
   print <<EOF;
-Usage: $MYNAME [OPTIONS] -- <recipient> <recipient> ...
+Usage: $MYNAME [OPTIONS] [-- <recipient> [<recipient> ...]]
 
 This script is simple command line interface to
 Twilio (http://www.twilio.com/) SMS service.
@@ -423,9 +427,24 @@ print <<EOF;
   -V  --version            Prints script version
   -h  --help               This help message
 
-EXAMPLE:
+EXAMPLES:
 
-  cat file | $MYNAME -f "+1234567890" -- +1987654321 +145678923
+  # send file contents over SMS
+  cat /path/to/file | $MYNAME -- +1987654321 +145678923
+  $MYNAME -M /path/to/file -- +1987654321 +145678923
+
+  # send simple string
+  $MYNAME -m 'Hello world from \$USER'  -- +1987654321
+  $MYNAME -m 'Hello world from \$USER' --rewrite  -- +1987654321
+  $MYNAME -m 'Hello world from \\\$USER' --rewrite  -- +1987654321
+
+  echo 'Hello world from \$USER' | $MYNAME  -- +1987654321
+  echo 'Hello world from \$USER' | $MYNAME --rewrite  -- +1987654321
+  echo 'Hello world from \\\$USER' | $MYNAME --rewrite  -- +1987654321
+
+  # process deferred messages (usually from cron)
+  $MYNAME -P
+
 EOF
 }
 
