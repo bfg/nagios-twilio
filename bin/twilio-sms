@@ -59,7 +59,7 @@ use constant MSG_LEN_LIMIT => 160;
 use constant TWILIO_URL    => 'https://api.twilio.com/2010-04-01/Accounts/%s/SMS/Messages.json';
 
 my $MYNAME = basename($0);
-my $VERSION = '0.21';
+my $VERSION = '0.22';
 my $HOME = ((getpwuid($>))[7]);
 my $verbose = 0;
 my $debug = 0;
@@ -71,7 +71,9 @@ my $ua = undef;
 my $jp = JSON->new->utf8(1)->pretty(1);
 my @cfg_files = (
   "/etc/${MYNAME}.conf",
+  "/etc/${MYNAME}/${MYNAME}.conf",
   "/usr/local/etc/${MYNAME}.conf",
+  "/usr/local/etc/${MYNAME}/${MYNAME}.conf",
   "/etc/icinga/${MYNAME}.conf",
   "/etc/nagios/${MYNAME}.conf",
   "/etc/nagios3/${MYNAME}.conf",

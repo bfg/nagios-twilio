@@ -44,7 +44,9 @@ rewrite       = 0
 
 ```
 /etc/twilio-sms.conf
+/etc/twilio-sms/twilio-sms.conf
 /usr/local/etc/twilio-sms.conf
+/usr/local/etc/twilio-sms/twilio-sms.conf
 /etc/icinga/twilio-sms.conf
 /etc/nagios/twilio-sms.conf
 /etc/nagios3/twilio-sms.conf
@@ -157,7 +159,9 @@ OPTIONS:
                            the following files on startup:
 
                            /etc/twilio-sms.conf
+                           /etc/twilio-sms/twilio-sms.conf
                            /usr/local/etc/twilio-sms.conf
+                           /usr/local/etc/twilio-sms/twilio-sms.conf
                            /etc/icinga/twilio-sms.conf
                            /etc/nagios/twilio-sms.conf
                            /etc/nagios3/twilio-sms.conf
