@@ -79,7 +79,7 @@ define command {
 }
 
 define command {
-        command_name    notify-host-by-twilio
+    command_name    notify-host-by-twilio
     command_line    /usr/bin/printf "%b" "Host: $HOSTNAME$\nState: $HOSTSTATE$\n\n$HOSTOUTPUT$" | /etc/icinga/plugins/twilio-sms -- $CONTACTPAGER$
 }
 ```
