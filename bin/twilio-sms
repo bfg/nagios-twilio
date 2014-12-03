@@ -55,11 +55,16 @@ my $cfg = {
 
 #####################################################
 
-use constant MSG_LEN_LIMIT => 160;
-use constant TWILIO_URL    => 'https://api.twilio.com/2010-04-01/Accounts/%s/SMS/Messages.json';
+# API documentation:
+#
+#  * http://www.twilio.com/docs/api/rest
+#  * http://www.twilio.com/docs/api/rest/sending-messages
+
+use constant MSG_LEN_LIMIT      => 1600;
+use constant TWILIO_URL         => 'https://api.twilio.com/2010-04-01/Accounts/%s/Messages.json';
 
 my $MYNAME = basename($0);
-my $VERSION = '0.22';
+my $VERSION = '0.23';
 my $HOME = ((getpwuid($>))[7]);
 my $verbose = 0;
 my $debug = 0;
@@ -260,7 +265,7 @@ sub msg_send_real {
     'Authorization',
     'Basic ' . encode_base64($msg->{user_id} . ':' . $msg->{auth_token}, '')
   );
-  $req->header('Content-Type', 'application/x-www-form-urlencoded');
+  $req->header('Content-Type', 'application/x-www-form-urlencoded; charset=UTF-8');
 
   my $body = 'From=' . uri_escape_utf8($msg->{from}) . "&";
   $body .= 'To=' . uri_escape_utf8($msg->{recipient}) . "&";
@@ -391,11 +396,16 @@ sub msg_rewrite {
 
 sub printhelp {
   no warnings;
+  my $max_len = MSG_LEN_LIMIT;
   print <<EOF;
 Usage: $MYNAME [OPTIONS] [-- <recipient> [<recipient> ...]]
 
 This script is simple command line interface to
 Twilio (http://www.twilio.com/) SMS service.
+
+Input message length is not important since it is split into
+multiple SMS messages if it's length exeedes limit of $max_len
+characters.
 
 OPTIONS:
       --default-config     Prints out default configuration file
@@ -444,9 +454,11 @@ EXAMPLES:
   echo 'Hello world from \$USER' | $MYNAME --rewrite  -- +1987654321
   echo 'Hello world from \\\$USER' | $MYNAME --rewrite  -- +1987654321
 
+  # send fortune of the day
+  fortune | $MYNAME -- +1987654321
+
   # process deferred messages (usually from cron)
   $MYNAME -P
-
 EOF
 }
 
