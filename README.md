@@ -172,11 +172,11 @@ OPTIONS:
                            /usr/local/etc/icinga/twilio-sms.conf
                            /usr/local/etc/nagios/twilio-sms.conf
                            /usr/local/etc/nagios3/twilio-sms.conf
-                           /home/bfg/config/twilio-sms/twilio-sms.conf
-                           /home/bfg/config/twilio-sms.conf
-                           /home/bfg/.config/twilio-sms/twilio-sms.conf
-                           /home/bfg/.config/twilio-sms.conf
-                           /home/bfg/.twilio-sms.conf
+                           /home/username/config/twilio-sms/twilio-sms.conf
+                           /home/username/config/twilio-sms.conf
+                           /home/username/.config/twilio-sms/twilio-sms.conf
+                           /home/username/.config/twilio-sms.conf
+                           /home/username/.twilio-sms.conf
 
   -m  --msg=MSG            Message text
   -M  --msg-file=FILE      Read message text from specified file
