@@ -36,7 +36,7 @@ user_id       = "<your twilio user_id>"
 auth_token    = "<your twilio auth token>"
 timeout       = 5
 verbose       = 0
-split_big_msg = 1   # you probably want to send sms messages larger than 160 chars
+split_big_msg = 0   # set to 1 if you want to send sms messages larger than 1600 chars
 rewrite       = 0
 ```
 
@@ -152,6 +152,10 @@ Usage: twilio-sms [OPTIONS] [-- <recipient> [<recipient> ...]]
 This script is simple command line interface to
 Twilio (http://www.twilio.com/) SMS service.
 
+Input message length is not important since it is split into
+multiple SMS messages if it's length exeedes limit of 1600
+characters.
+
 OPTIONS:
       --default-config     Prints out default configuration file
   -c  --config=FILE        Read configuration from specified
@@ -210,6 +214,9 @@ EXAMPLES:
   echo 'Hello world from $USER' | twilio-sms  -- +1987654321
   echo 'Hello world from $USER' | twilio-sms --rewrite  -- +1987654321
   echo 'Hello world from \$USER' | twilio-sms --rewrite  -- +1987654321
+
+  # send fortune of the day
+  fortune | twilio-sms -- +1987654321
 
   # process deferred messages (usually from cron)
   twilio-sms -P
