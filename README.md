@@ -60,9 +60,12 @@ $HOME/.config/twilio-sms.conf
 $HOME/.twilio-sms.conf
 ```
 
-Script allways tries to read all configuration files listed above, variable values
+The script always tries to read all configuration files listed above, variable values
 are inherited from previously loaded configuration files if they are omitted from
-configuration file currently being loaded.
+configuration file currently being loaded. The name of the configuration file changes
+dynamically with the name of the executable. If you rename the executable, you also
+have to rename the configuration file. To see the real paths searched, call the
+executable with `--help` and look for the `-c` parameter description.
 
   * Try to send a message :)
 
