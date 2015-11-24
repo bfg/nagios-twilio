@@ -18,6 +18,10 @@ Requirements
   * [URI::Escape](https://metacpan.org/module/URI::Escape)
   * [LWP/libwww-perl](https://metacpan.org/module/LWP)
 
+These dependencies can be pulled in automatically on Debian/Ubuntu by running: 
+
+  * `apt-get -y install libjson-perl libemail-mime-encodings-perl liburi-escape-xs-perl libwww-perl`
+
 Setup
 ==
 
